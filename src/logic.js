@@ -52,7 +52,7 @@ export async function suggestNextLines(modelId, line) {
         role: "system",
         content: `You write song lyrics. Given one line of lyrics, suggest 5 possible NEXT lines that continue the song.
 
-Each suggested line must end in a word that RHYMES with the last word of the given line ("${target}"), and must make sense thematically as a continuation of the given line.
+Each suggested line must end in a DIFFERENT word that RHYMES with the last word of the given line ("${target}") — never reuse "${target}" itself as the ending word — and must make sense thematically as a continuation of the given line.
 
 Output ONLY a numbered list of exactly 5 lines, nothing else:
 1. <line>
@@ -72,14 +72,24 @@ Output ONLY a numbered list of exactly 5 lines, nothing else:
 
   let options = parseOptions(text);
 
-  // Deterministically verify each option actually rhymes; keep rhyming ones first.
-  const checked = options.map((opt) => ({
-    line: opt,
-    rhymes: rhymes(target, lastWord(opt)),
-  }));
+  // Deterministically verify each option actually rhymes; keep genuinely-different
+  // rhyming words first (reusing the exact same word isn't a useful suggestion),
+  // then other rhymes, then non-rhymes as a last resort.
+  const targetLower = target.toLowerCase().replace(/[^a-z]/g, "");
+  const checked = options.map((opt) => {
+    const optLastWord = lastWord(opt);
+    const sameWord = optLastWord.toLowerCase().replace(/[^a-z]/g, "") === targetLower;
+    return {
+      line: opt,
+      rhymes: rhymes(target, optLastWord),
+      sameWord,
+    };
+  });
 
-  const rhymingFirst = [...checked.filter((c) => c.rhymes), ...checked.filter((c) => !c.rhymes)];
-  const finalOptions = rhymingFirst.slice(0, 5).map((c) => c.line);
+  const distinctRhymes = checked.filter((c) => c.rhymes && !c.sameWord);
+  const sameWordRhymes = checked.filter((c) => c.rhymes && c.sameWord);
+  const nonRhymes = checked.filter((c) => !c.rhymes);
+  const finalOptions = [...distinctRhymes, ...sameWordRhymes, ...nonRhymes].slice(0, 5).map((c) => c.line);
 
   if (finalOptions.length === 0) {
     return { options: [], target, error: "Couldn't generate next lines — try a slightly longer or clearer line." };
